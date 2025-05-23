@@ -4,6 +4,5 @@ datasets/__pycache__ evaluation/__pycache__ model/__pycache__ runners/__pycache_
 *.ckpt
 *.bin
 *.pth
-*.png
 __pycache__/
 get_psnr_ssim_lpips_Diffusion.py
