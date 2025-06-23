@@ -47,6 +47,17 @@ dataset_config:
   dataset_path: 'your_dataset_path'
 ```
 
+### MSAW Dataset Preparation
+If you want to use the MSAW dataset, you can preprocess it using the provided `MSAW_processing.py` script.
+
+1. Place the original MSAW data in an appropriate directory.
+2. Prepare the division line coordinates (see `division_line_coordinates.txt` for an example).
+3. Run the preprocessing script as follows:
+   ```bash
+   python MSAW_processing.py --orig_dir [path_to_original_data] --target_height 512 --target_width 512
+   ```
+
+
 ## Train and Test
 ### Specify your configuration file
 Modify the configuration file based on our templates in <font color=violet><b>configs/Template-*.yaml</b></font>
