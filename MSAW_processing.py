@@ -31,63 +31,81 @@ def naming(source_dir, target_dir, word):
 def count_zero(vector):
     return np.sum(vector == 0)
 
-def extract(RGB_dir, RGB_target_dir, target_height, target_width, extraction_factor):
+def extract_patches(RGB_directory, RGB_target_directory, target_height, target_width, min_leftover_ratio, small_image_policy='skip'):
     """
     Extracts smaller image patches from larger images (RGB, SAR).
     For each dimension, if the leftover (remainder) after dividing by the target size
-    is greater than or equal to extraction_factor * target size, an additional patch is extracted.
+    is greater than or equal to min_leftover_ratio * target size, an additional patch is extracted.
+    If the image is smaller than the target size, behavior is determined by small_image_policy:
+        - 'skip': skip the image
+        - 'pad': pad the image to the target size and extract a single patch
 
     Args:
-        RGB_dir (str): Directory containing RGB images.
-        RGB_target_dir (str): Directory to save extracted RGB patches.
+        RGB_directory (str): Directory containing RGB images.
+        RGB_target_directory (str): Directory to save extracted RGB patches.
         target_height (int): Height of the extracted patches.
         target_width (int): Width of the extracted patches.
-        extraction_factor (float): If the leftover region is greater than or equal to this factor times the target size, extract an additional patch.
+        min_leftover_ratio (float): If the leftover region is greater than or equal to this ratio times the target size, extract an additional patch.
+        small_image_policy (str): 'skip' or 'pad'.
     """
-    # Define directories for SAR images
-    SAR_dir = RGB_dir.replace("PS-RGB", "SAR-Intensity")
-    SAR_target_dir = RGB_target_dir.replace("PS-RGB", "SAR-Intensity")
+    SAR_directory = RGB_directory.replace("PS-RGB", "SAR-Intensity")
+    SAR_target_directory = RGB_target_directory.replace("PS-RGB", "SAR-Intensity")
 
-    # Create target directories if they don't exist
-    for dir in [RGB_target_dir, SAR_target_dir]:
-        os.makedirs(dir, exist_ok=True)
+    for directory in [RGB_target_directory, SAR_target_directory]:
+        os.makedirs(directory, exist_ok=True)
 
-    # Get file lists for each image type
-    RGB_filelist = os.listdir(RGB_dir)
-    SAR_filelist = os.listdir(SAR_dir)
+    RGB_file_list = os.listdir(RGB_directory)
+    SAR_file_list = os.listdir(SAR_directory)
 
-    total_files = len(RGB_filelist)
+    total_files = len(RGB_file_list)
 
     for idx_file in range(total_files):
-        # Read RGB and SAR images
-        RGB_arr = cv2.imread(f"{RGB_dir}/{RGB_filelist[idx_file]}")
-        SAR_arr = cv2.imread(f"{SAR_dir}/{SAR_filelist[idx_file]}")
+        RGB_arr = cv2.imread(f"{RGB_directory}/{RGB_file_list[idx_file]}")
+        SAR_arr = cv2.imread(f"{SAR_directory}/{SAR_file_list[idx_file]}")
 
         image_shape = [int(RGB_arr.shape[0]), int(RGB_arr.shape[1])]
         target_shape = [target_height, target_width]
-        quotient = [image_shape[0] // target_shape[0], image_shape[1] // target_shape[1]]
-        remainder = [image_shape[0] % target_shape[0], image_shape[1] % target_shape[1]]
+        num_full_patches = [image_shape[0] // target_shape[0], image_shape[1] // target_shape[1]]
+        leftover_pixels = [image_shape[0] % target_shape[0], image_shape[1] % target_shape[1]]
 
-        # Determine the number of patches in each dimension
-        num_patches = []
+        if image_shape[0] < target_height or image_shape[1] < target_width:
+            if small_image_policy == 'skip':
+                print(f"Skipping file {RGB_file_list[idx_file]} due to small dimensions")
+                continue
+            elif small_image_policy == 'pad':
+                pad_h = max(0, target_height - image_shape[0])
+                pad_w = max(0, target_width - image_shape[1])
+                pad_top = pad_h // 2
+                pad_bottom = pad_h - pad_top
+                pad_left = pad_w // 2
+                pad_right = pad_w - pad_left
+                RGB_patch = cv2.copyMakeBorder(RGB_arr, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
+                SAR_patch = cv2.copyMakeBorder(SAR_arr, pad_top, pad_bottom, pad_left, pad_right, cv2.BORDER_CONSTANT, value=0)
+                for arr, directory, file_list in zip([RGB_patch, SAR_patch],
+                                                    [RGB_target_directory, SAR_target_directory],
+                                                    [RGB_file_list, SAR_file_list]):
+                    filename = f"{file_list[idx_file].split('.png')[0]}_0_0.png"
+                    cv2.imwrite(f"{directory}/{filename}", arr)
+                continue
+            else:
+                print(f"Unknown small_image_policy: {small_image_policy}. Skipping file {RGB_file_list[idx_file]}")
+                continue
+
+        num_patches_per_axis = []
         for i in range(2):
-            # Always at least one patch
-            n = quotient[i]
-            # If leftover is large enough, add one more patch
-            if remainder[i] >= extraction_factor * target_shape[i]:
+            n = num_full_patches[i]
+            if leftover_pixels[i] >= min_leftover_ratio * target_shape[i]:
                 n += 1
-            num_patches.append(n)
+            num_patches_per_axis.append(n)
 
         try:
-            for h in range(num_patches[0]):
-                for w in range(num_patches[1]):
-                    # Calculate start and end coordinates for extraction
+            for h in range(num_patches_per_axis[0]):
+                for w in range(num_patches_per_axis[1]):
                     start_h = h * target_shape[0]
                     start_w = w * target_shape[1]
                     end_h = start_h + target_shape[0]
                     end_w = start_w + target_shape[1]
 
-                    # If patch goes out of bounds, shift window to fit
                     if end_h > image_shape[0]:
                         start_h = image_shape[0] - target_shape[0]
                         end_h = image_shape[0]
@@ -95,19 +113,17 @@ def extract(RGB_dir, RGB_target_dir, target_height, target_width, extraction_fac
                         start_w = image_shape[1] - target_shape[1]
                         end_w = image_shape[1]
 
-                    # Extract sub-images
                     RGB_patch = RGB_arr[start_h:end_h, start_w:end_w, :]
                     SAR_patch = SAR_arr[start_h:end_h, start_w:end_w, :]
 
-                    # Save extracted sub-images
-                    for arr, dir, filelist in zip([RGB_patch, SAR_patch],
-                                                  [RGB_target_dir, SAR_target_dir],
-                                                  [RGB_filelist, SAR_filelist]):
-                        filename = f"{filelist[idx_file].split('.png')[0]}_{start_h}_{start_w}.png"
-                        cv2.imwrite(f"{dir}/{filename}", arr)
+                    for arr, directory, file_list in zip([RGB_patch, SAR_patch],
+                                                        [RGB_target_directory, SAR_target_directory],
+                                                        [RGB_file_list, SAR_file_list]):
+                        filename = f"{file_list[idx_file].split('.png')[0]}_{start_h}_{start_w}.png"
+                        cv2.imwrite(f"{directory}/{filename}", arr)
 
         except Exception as e:
-            print(f"Error processing file {RGB_filelist[idx_file]}: {str(e)}")
+            print(f"Error processing file {RGB_file_list[idx_file]}: {str(e)}")
 
     print("Extraction completed.")
             
@@ -299,18 +315,18 @@ def split(RGB_json_dir, div_line_coords):
                 shutil.copy2(src, dst)
     print("Train & test split is done.")
 
-def cut_zero_png(input_dir, output_dir, black_rate=0.95):
+def remove_black_rows_cols(input_directory, output_directory, black_rate=0.95):
     """
     Remove rows and columns with a high percentage of black pixels from PNG images.
     Args:
-        input_dir (str): Directory containing input PNG images.
-        output_dir (str): Directory to save processed PNG images.
+        input_directory (str): Directory containing input PNG images.
+        output_directory (str): Directory to save processed PNG images.
         black_rate (float): Threshold ratio for black pixels to remove row/column.
     """
-    os.makedirs(output_dir, exist_ok=True)
-    file_list = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
+    os.makedirs(output_directory, exist_ok=True)
+    file_list = sorted([f for f in os.listdir(input_directory) if f.endswith('.png')])
     for file_name in file_list:
-        img = cv2.imread(os.path.join(input_dir, file_name))
+        img = cv2.imread(os.path.join(input_directory, file_name))
         if img is None:
             print(f"Failed to read {file_name}")
             continue
@@ -323,16 +339,17 @@ def cut_zero_png(input_dir, output_dir, black_rate=0.95):
         col_black = np.sum(np.sum(img, axis=2) == 0, axis=0) > int(black_rate * img.shape[0])
         img = img[:, ~col_black]
 
-        cv2.imwrite(os.path.join(output_dir, file_name), img)
+        cv2.imwrite(os.path.join(output_directory, file_name), img)
 
 def processing(
     orig_dir, 
     div_line_coords, 
     target_height=512, 
     target_width=512, 
-    extraction_factor=0.25,
-    use_cut_zero=True,
-    black_rate=0.95
+    min_leftover_ratio=0.25,
+    use_remove_black=True,
+    black_rate=0.95,
+    small_image_policy='skip'
 ):
     """
     Main processing pipeline for dataset preparation.
@@ -341,14 +358,15 @@ def processing(
         div_line_coords (tuple): Coordinates for train/val/test split.
         target_height (int): Height of patches to extract.
         target_width (int): Width of patches to extract.
-        extraction_factor (float): Extraction factor for patching.
-        use_cut_zero (bool): Whether to apply cut_zero_png after PNG conversion.
-        black_rate (float): Threshold for cut_zero_png.
+        min_leftover_ratio (float): Minimum leftover ratio for patching.
+        use_remove_black (bool): Whether to apply remove_black_rows_cols after PNG conversion.
+        black_rate (float): Threshold for remove_black_rows_cols.
+        small_image_policy (str): 'skip' or 'pad'.
     """
     RGB_dir = os.path.join(orig_dir, "PS-RGB")
     SAR_dir = os.path.join(orig_dir, "SAR-Intensity")
     dirs = [RGB_dir, SAR_dir]
-    processed_dirs = [dir + "_processed" for dir in dirs]
+    processed_dirs = [directory + "_processed" for directory in dirs]
     RGB_dir_dict = {}
     SAR_dir_dict = {}
     dicts = [RGB_dir_dict, SAR_dir_dict]
@@ -366,45 +384,50 @@ def processing(
     rgb_to_png(RGB_dir, dicts[0]["png"])
     sar_to_HHVVVH_bgr2rgb(SAR_dir, dicts[1]["png"])
 
-    # 2-1. Apply cut_zero to PNGs (optional)
-    if use_cut_zero:
-        cutzero_dirs = [dicts[0]["png"] + "_cutzero", dicts[1]["png"] + "_cutzero"]
-        cut_zero_png(dicts[0]["png"], cutzero_dirs[0], black_rate)
-        cut_zero_png(dicts[1]["png"], cutzero_dirs[1], black_rate)
+    # 2-1. Apply remove_black_rows_cols to PNGs (optional)
+    if use_remove_black:
+        remove_black_dirs = [dicts[0]["png"] + "_removeblack", dicts[1]["png"] + "_removeblack"]
+        remove_black_rows_cols(dicts[0]["png"], remove_black_dirs[0], black_rate)
+        remove_black_rows_cols(dicts[1]["png"], remove_black_dirs[1], black_rate)
     else:
-        cutzero_dirs = [dicts[0]["png"], dicts[1]["png"]]
+        remove_black_dirs = [dicts[0]["png"], dicts[1]["png"]]
 
     # 3. Extract patches from PNG images (before split)
     # Output directory for RGB patches
-    RGB_patch_dir = cutzero_dirs[0] + f"_patches_{target_height}x{target_width}"
+    RGB_patch_dir = remove_black_dirs[0] + f"_patches_{target_height}x{target_width}"
     # Output directory for SAR patches
-    SAR_patch_dir = cutzero_dirs[1] + f"_patches_{target_height}x{target_width}"
+    SAR_patch_dir = remove_black_dirs[1] + f"_patches_{target_height}x{target_width}"
 
     # 4. Split using JSON from original images (not patches)
     RGB_json_dir = dicts[0]["extract_json"]
     split(RGB_json_dir, div_line_coords)
 
-    # 5. Apply cut_zero to each split directory
+    # 4-1. Apply CLAHE to split SAR-Intensity folders
     split_names = ["train", "val", "test"]
+    for split_name in split_names:
+        sar_split_dir = os.path.join("SAR-Intensity_processed", "split", split_name)
+        clahe_sar_png_dir(sar_split_dir)
+
+    # 5. Apply remove_black_rows_cols to each split directory
     for modality in ["PS-RGB", "SAR-Intensity"]:
         for split_name in split_names:
-            split_dir = os.path.join(f"{modality}_processed", "split", split_name)
-            cutzero_dir = split_dir + "_cutzero"
-            cut_zero_png(split_dir, cutzero_dir, black_rate)
+            split_directory = os.path.join(f"{modality}_processed", "split", split_name)
+            remove_black_directory = split_directory + "_removeblack"
+            remove_black_rows_cols(split_directory, remove_black_directory, black_rate)
 
-    # 6. After cut_zero, extract patches from cutzero split images
+    # 6. After remove_black_rows_cols, extract patches from removeblack split images
     for split_name in split_names:
         for modality in ["PS-RGB", "SAR-Intensity"]:
-            input_dir = os.path.join(f"{modality}_processed", "split", split_name + "_cutzero")
-            output_dir = input_dir + f"_patches_{target_height}x{target_width}"
-            extract(
-                RGB_dir=input_dir,
-                RGB_target_dir=output_dir,
+            input_directory = os.path.join(f"{modality}_processed", "split", split_name + "_removeblack")
+            output_directory = input_directory + f"_patches_{target_height}x{target_width}"
+            extract_patches(
+                RGB_directory=input_directory,
+                RGB_target_directory=output_directory,
                 target_height=target_height,
                 target_width=target_width,
-                extraction_factor=extraction_factor
+                min_leftover_ratio=min_leftover_ratio,
+                small_image_policy=small_image_policy
             )
-
     print("All processing done.")
 
 def clahe_sar_png_dir(sar_png_dir):
