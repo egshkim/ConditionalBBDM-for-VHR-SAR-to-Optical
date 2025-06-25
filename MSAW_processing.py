@@ -384,38 +384,19 @@ def processing(
     rgb_to_png(RGB_dir, dicts[0]["png"])
     sar_to_HHVVVH_bgr2rgb(SAR_dir, dicts[1]["png"])
 
-    # 2-1. Apply remove_black_rows_cols to PNGs (optional)
-    if use_remove_black:
-        remove_black_dirs = [dicts[0]["png"] + "_removeblack", dicts[1]["png"] + "_removeblack"]
-        remove_black_rows_cols(dicts[0]["png"], remove_black_dirs[0], black_rate)
-        remove_black_rows_cols(dicts[1]["png"], remove_black_dirs[1], black_rate)
-    else:
-        remove_black_dirs = [dicts[0]["png"], dicts[1]["png"]]
-
-    # 3. Extract patches from PNG images (before split)
-    # Output directory for RGB patches
-    RGB_patch_dir = remove_black_dirs[0] + f"_patches_{target_height}x{target_width}"
-    # Output directory for SAR patches
-    SAR_patch_dir = remove_black_dirs[1] + f"_patches_{target_height}x{target_width}"
-
-    # 4. Split using JSON from original images (not patches)
+    # 3. Split using JSON from original images (not patches)
     RGB_json_dir = dicts[0]["extract_json"]
     split(RGB_json_dir, div_line_coords)
 
-    # 4-1. Apply CLAHE to split SAR-Intensity folders
+    # 4. Apply remove_black_rows_cols to each split directory
     split_names = ["train", "val", "test"]
-    for split_name in split_names:
-        sar_split_dir = os.path.join("SAR-Intensity_processed", "split", split_name)
-        clahe_sar_png_dir(sar_split_dir)
-
-    # 5. Apply remove_black_rows_cols to each split directory
     for modality in ["PS-RGB", "SAR-Intensity"]:
         for split_name in split_names:
             split_directory = os.path.join(f"{modality}_processed", "split", split_name)
             remove_black_directory = split_directory + "_removeblack"
             remove_black_rows_cols(split_directory, remove_black_directory, black_rate)
 
-    # 6. After remove_black_rows_cols, extract patches from removeblack split images
+    # 5. Extract patches from removeblack split images
     for split_name in split_names:
         for modality in ["PS-RGB", "SAR-Intensity"]:
             input_directory = os.path.join(f"{modality}_processed", "split", split_name + "_removeblack")
@@ -428,6 +409,12 @@ def processing(
                 min_leftover_ratio=min_leftover_ratio,
                 small_image_policy=small_image_policy
             )
+
+    # 6. Apply CLAHE to extracted SAR-Intensity patches
+    for split_name in split_names:
+        sar_patch_dir = os.path.join("SAR-Intensity_processed", "split", split_name + "_removeblack_patches_" + f"{target_height}x{target_width}")
+        clahe_sar_png_dir(sar_patch_dir)
+
     print("All processing done.")
 
 def clahe_sar_png_dir(sar_png_dir):
