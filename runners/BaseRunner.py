@@ -107,8 +107,18 @@ class BaseRunner(ABC):
             self.global_epoch = model_states['epoch']
             self.global_step = model_states['step']
 
-            # load model
-            self.net.load_state_dict(model_states['model'])
+            # load model (strict=False to support slimmed checkpoints
+            # where frozen VQ-GAN keys were removed to save disk)
+            result = self.net.load_state_dict(model_states['model'], strict=False)
+            if result.missing_keys:
+                # Only frozen VQ-GAN keys may be missing — they are loaded
+                # from ckpt_path during model construction.
+                unexpected_missing = [k for k in result.missing_keys
+                                      if not k.startswith(('vqgan.', 'first_stage_model.'))]
+                if unexpected_missing:
+                    raise RuntimeError(f"Unexpected missing keys in checkpoint: {unexpected_missing}")
+            if result.unexpected_keys:
+                print(f"Warning: unexpected keys in checkpoint (ignored): {result.unexpected_keys[:5]}")
 
             # load ema
             if self.use_ema:
